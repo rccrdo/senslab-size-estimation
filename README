@@ -1,13 +1,15 @@
 A Contiki-OS based neighborhood size estimator for the SensLab WSN platform.
 
-The distributed app for size-estimation is inside "senslab-app". The folder
-"scripts" contains a few post-processing tools that facilitate working with
-the SensLab infrastructure.
+The distributed app for size-estimation is inside "senslab-app". The
+folder "scripts" contains a few post-processing tools that facilitate
+working with the SensLab infrastructure.
 
-Warning: The size-estimator has been developed against git-rev. 4bc8aab4c7a90db4d03c7a3296649f3ff861b454 
-of SensLab's source code distribution.
+Warning: The size-estimator has been developed against
+git-rev. 4bc8aab4c7a90db4d03c7a3296649f3ff861b454 of SensLab's source
+code distribution.
 
-For correct operation you must first apply the patch in "patches/senslab-contiki.diff".
-This is needed to fix a time-keeping bug in the kernel and introduce an helper function
-to tweak the radio tx power.
+For correct operation you must first apply the patch in
+"patches/senslab-contiki.diff".  This is needed to fix a time-keeping
+bug in the kernel and introduce an helper function to tweak the radio
+tx power.
 
