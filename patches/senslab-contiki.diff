@@ -1,0 +1,300 @@
+diff --git a/software/OS/Contiki/core/sys/etimer.c b/software/OS/Contiki/core/sys/etimer.c
+index 089ddbc..e6b5d76 100644
+--- a/software/OS/Contiki/core/sys/etimer.c
++++ b/software/OS/Contiki/core/sys/etimer.c
+@@ -49,6 +49,7 @@
+ 
+ #include "sys/etimer.h"
+ #include "sys/process.h"
++#include "assert.h"
+ 
+ static struct etimer *timerlist;
+ static clock_time_t next_expiration;
+@@ -58,24 +59,36 @@ PROCESS(etimer_process, "Event timer");
+ static void
+ update_time(void)
+ {
+-  clock_time_t tdist;
+-  clock_time_t now;
+-  struct etimer *t;
++	next_expiration = 0;
+ 
+-  if (timerlist == NULL) {
+-    next_expiration = 0;
+-  } else {
+-    now = clock_time();
+-    t = timerlist;
+-    /* Must calculate distance to next time into account due to wraps */
+-    tdist = t->timer.start + t->timer.interval - now;
+-    for(t = t->next; t != NULL; t = t->next) {
+-      if(t->timer.start + t->timer.interval - now < tdist) {
+-	tdist = t->timer.start + t->timer.interval - now;
+-      }
+-    }
+-    next_expiration = now + tdist;
+-  }
++	if (timerlist != NULL) {
++		char tdist_found;
++		clock_time_t tdist;
++		clock_time_t now;
++		struct etimer *t;
++
++		now = clock_time();
++		tdist_found = 0;
++		tdist = 0xffffffff; /* shut-ups warning */
++		/* Must calculate distance to next time into account due to wraps */
++
++		for(t=timerlist ; t != NULL; t = t->next) {
++			clock_time_t tmp_tdist;
++			if (t->timer.start + t->timer.interval >= now) {
++				tmp_tdist = t->timer.start + t->timer.interval - now;
++
++				if (!tdist_found) {
++					tdist = tmp_tdist;
++					tdist_found = 1;
++				} else {
++					if (tmp_tdist < tdist)
++						tdist = tmp_tdist;
++				}
++			}
++		}
++		if (tdist_found)
++			next_expiration = now + tdist;
++	}
+ }
+ /*---------------------------------------------------------------------------*/
+ PROCESS_THREAD(etimer_process, ev, data)
+diff --git a/software/OS/Contiki/core/sys/process.h b/software/OS/Contiki/core/sys/process.h
+index 097ac03..eee68cd 100644
+--- a/software/OS/Contiki/core/sys/process.h
++++ b/software/OS/Contiki/core/sys/process.h
+@@ -272,7 +272,7 @@ typedef unsigned char process_num_events_t;
+  * \hideinitializer
+  */
+ #define PROCESS_THREAD(name, ev, data) 				\
+-static PT_THREAD(process_thread_##name(struct pt *process_pt,	\
++PT_THREAD(process_thread_##name(struct pt *process_pt,  	\
+ 				       process_event_t ev,	\
+ 				       process_data_t data))
+ 
+diff --git a/software/OS/Contiki/core/sys/timer.c b/software/OS/Contiki/core/sys/timer.c
+index 9fcb54b..a0baf86 100644
+--- a/software/OS/Contiki/core/sys/timer.c
++++ b/software/OS/Contiki/core/sys/timer.c
+@@ -48,6 +48,8 @@
+ #include "contiki-conf.h"
+ #include "sys/clock.h"
+ #include "sys/timer.h"
++#include "assert.h"
++#include <stdio.h>
+ 
+ /*---------------------------------------------------------------------------*/
+ /**
+@@ -121,10 +123,26 @@ timer_restart(struct timer *t)
+ int
+ timer_expired(struct timer *t)
+ {
++  int ret;
++  clock_time_t now = clock_time();
++
+   /* Note: Can not return diff >= t->interval so we add 1 to diff and return
+      t->interval < diff - required to avoid an internal error in mspgcc. */
+-  clock_time_t diff = (clock_time() - t->start) + 1;
+-  return t->interval < diff;
++  /*
++
++  assert (now >= t->start);
++  clock_time_t diff = (now - t->start) + 1;
++  if (!(now >= t->start)) {
++    printf("timer_expired now %ld, start %ld, diff %ld, interval %ld, ret %d\n", now, t->start, diff, t->interval, t->interval < diff);
++  }
++  */
++  ret = 0;
++  if (now >= t->start) {
++    clock_time_t diff = (now - t->start) + 1;
++    ret = t->interval < diff;
++  }
++
++  return ret;
+ 
+ }
+ /*---------------------------------------------------------------------------*/
+@@ -141,7 +159,10 @@ timer_expired(struct timer *t)
+ clock_time_t
+ timer_remaining(struct timer *t)
+ {
+-  return t->start + t->interval - clock_time();
++  clock_time_t now;
++  now = clock_time();
++  assert (t->start + t->interval > now);
++  return t->start + t->interval - now;
+ }
+ /*---------------------------------------------------------------------------*/
+ 
+diff --git a/software/OS/Contiki/platform/wsn430/Makefile.wsn430 b/software/OS/Contiki/platform/wsn430/Makefile.wsn430
+index b7e0a5c..dbba5f9 100644
+--- a/software/OS/Contiki/platform/wsn430/Makefile.wsn430
++++ b/software/OS/Contiki/platform/wsn430/Makefile.wsn430
+@@ -30,6 +30,7 @@ endif
+ 
+ CONTIKI_TARGET_SOURCEFILES += $(ARCH) $(UIPDRIVERS) $(CONTIKI_TARGET_MAIN)
+ 
+-MCU=msp430x1611
++#MCU=msp430x1611
++MCU=msp430f1611
+ include $(CONTIKI)/cpu/msp430/Makefile.msp430
+ 
+diff --git a/software/OS/Contiki/platform/wsn430/dev/cc1100-radio.c b/software/OS/Contiki/platform/wsn430/dev/cc1100-radio.c
+index 317da9d..90ed3f6 100644
+--- a/software/OS/Contiki/platform/wsn430/dev/cc1100-radio.c
++++ b/software/OS/Contiki/platform/wsn430/dev/cc1100-radio.c
+@@ -156,9 +156,24 @@ int cc1100_radio_init(void) {
+ 
+ 	cc1100_cfg_chan(6);
+ 
+-	// Set the TX Power
+-	uint8_t table[1];
+-	table[0] = 0xC2; // +10dBm
++	/*
++	 * Set the TX Power, see table 30 of radio-cc100.pdf
++	 *
++	 * Radio operates at 868Mhz
++	 *
++	 * tx power [dbm]    -30  | -20  | -15 |  -10 |  -5  |   0  |  5   |  7   |  10
++	 * patable setting   0x03 | 0x0d | 0x1c| 0x34 | 0x57 | 0x8e | 0x85 | 0xcc | 0xc3
++	 *
++	 * -30dbm to -5dbm -> not all neighboors can communicate with each other (*tested*)
++	 *
++	 * By default it was to as
++	 * table[0] = 0xC2; // +10dBm
++	 * experiment-naming:
++	 * low-power was 0x1c
++	 * medium-power was 0x34
++	 * 
++	 */
++	uint8_t table[] = {0xc2};
+ 	cc1100_cfg_patable(table, 1);
+ 	cc1100_cfg_pa_power(0);
+ 
+@@ -174,6 +189,72 @@ int cc1100_radio_init(void) {
+ 
+ 	return 1;
+ }
++
++void cc1100_radio_init_with_power(unsigned char power) {
++	off();
++
++  	cc1100_init();
++	cc1100_cmd_idle();
++
++	cc1100_cfg_append_status(CC1100_APPEND_STATUS_ENABLE);
++	cc1100_cfg_crc_autoflush(CC1100_CRC_AUTOFLUSH_DISABLE);
++	cc1100_cfg_white_data(CC1100_DATA_WHITENING_ENABLE);
++	cc1100_cfg_crc_en(CC1100_CRC_CALCULATION_ENABLE);
++	cc1100_cfg_freq_if(0x0C);
++
++	cc1100_cfg_fs_autocal(CC1100_AUTOCAL_4TH_TX_RX_TO_IDLE);
++	cc1100_cfg_mod_format(CC1100_MODULATION_MSK);
++	cc1100_cfg_sync_mode(CC1100_SYNCMODE_30_32);
++	cc1100_cfg_manchester_en(CC1100_MANCHESTER_DISABLE);
++
++	cc1100_cfg_txoff_mode(CC1100_TXOFF_MODE_IDLE);
++	cc1100_cfg_rxoff_mode(CC1100_RXOFF_MODE_IDLE);
++
++	// set channel bandwidth (560 kHz)
++	cc1100_cfg_chanbw_e(0);
++	cc1100_cfg_chanbw_m(2);
++
++	// set data rate (0xD/0x2F is 250kbps)
++	cc1100_cfg_drate_e(0x0D);
++	cc1100_cfg_drate_m(0x2F);
++
++	cc1100_cfg_chan(6);
++
++	/*
++	 * Set the TX Power, see table 30 of radio-cc100.pdf
++	 *
++	 * Radio operates at 868Mhz
++	 *
++	 * tx power [dbm]    -30  | -20  | -15 |  -10 |  -5  |   0  |  5   |  7   |  10
++	 * patable setting   0x03 | 0x0d | 0x1c| 0x34 | 0x57 | 0x8e | 0x85 | 0xcc | 0xc3
++	 *
++	 * -30dbm to -5dbm -> not all neighboors can communicate with each other (*tested*)
++	 *
++	 * By default it was to as
++	 * table[0] = 0xC2; // +10dBm
++	 * experiment-naming:
++	 * low-power was 0x1c
++	 * medium-power was 0x34
++	 * 
++	 */
++	uint8_t table[1];
++	table[0] = power;
++	cc1100_cfg_patable(table, 1);
++	cc1100_cfg_pa_power(0);
++
++	// Calibrate once at start
++	cc1100_cmd_calibrate();
++
++	// Clear flags
++	//receive_on = 0;
++	//rx_flag = 0;
++
++	// Start the process
++	//process_start(&cc1100_radio_process, NULL);
++
++	on();
++}
++
+ /*---------------------------------------------------------------------------*/
+ static int cc1100_off(void) {
+ 	PRINTF("cc1100_off\n");
+diff --git a/software/OS/Contiki/platform/wsn430/dev/cc1100-radio.h b/software/OS/Contiki/platform/wsn430/dev/cc1100-radio.h
+index dfb02a9..cbded70 100644
+--- a/software/OS/Contiki/platform/wsn430/dev/cc1100-radio.h
++++ b/software/OS/Contiki/platform/wsn430/dev/cc1100-radio.h
+@@ -47,6 +47,7 @@
+ #include "dev/radio.h"
+ 
+ int cc1100_radio_init(void);
++void cc1100_radio_init_with_power(unsigned char power);
+ 
+ extern const struct radio_driver cc1100_radio_driver;
+ 
+diff --git a/software/OS/Contiki/platform/wsn430/dev/cc2420-radio.c b/software/OS/Contiki/platform/wsn430/dev/cc2420-radio.c
+index 308e9bb..631550c 100644
+--- a/software/OS/Contiki/platform/wsn430/dev/cc2420-radio.c
++++ b/software/OS/Contiki/platform/wsn430/dev/cc2420-radio.c
+@@ -174,6 +174,20 @@ int cc2420_radio_init(void) {
+ 
+ 	return 1;
+ }
++
++void cc2420_radio_reinit_with_power(unsigned char power) {
++	off();
++	cc2420_init();
++	cc2420_set_frequency(2405 + 5 * 26);
++	cc2420_set_fifopthr(127);
++	cc2420_io_fifop_int_clear();
++	cc2420_io_fifop_int_enable();
++	cc2420_io_fifop_int_set_rising();
++	cc2420_io_fifop_register_cb(irq_rx);
++
++	cc2420_set_txpower(power);
++	on();
++}
+ /*---------------------------------------------------------------------------*/
+ static int cc2420_off(void) {
+ 	/* Don't do anything if we are already turned off. */
+diff --git a/software/OS/Contiki/platform/wsn430/dev/cc2420-radio.h b/software/OS/Contiki/platform/wsn430/dev/cc2420-radio.h
+index 89f2287..dad3150 100644
+--- a/software/OS/Contiki/platform/wsn430/dev/cc2420-radio.h
++++ b/software/OS/Contiki/platform/wsn430/dev/cc2420-radio.h
+@@ -47,6 +47,7 @@
+ #include "dev/radio.h"
+ 
+ int cc2420_radio_init(void);
++void cc2420_radio_reinit_with_power(unsigned char power);
+ 
+ extern const struct radio_driver cc2420_radio_driver;
+ 
